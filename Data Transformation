@@ -1,0 +1,49 @@
+import apache_beam as beam
+from apache_beam.options.pipeline_options import PipelineOptions
+import json
+
+# Function to parse JSON
+def parse_json(line):
+    try:
+        return json.loads(line)
+    except:
+        return None
+
+# Clean and normalize the record
+def clean_sales(record):
+    if 'id' in record:
+        record['SaleID'] = record.get('id')
+        record['CustomerID'] = record.get('value1')
+        record['ProductID'] = record.get('value2')
+        record['SaleDate'] = record.get('date')
+        record['Quantity'] = record.get('value3') or record.get('category')
+        record['TotalAmount'] = record.get('amount')
+    if not all([record.get('CustomerID'), record.get('ProductID'), record.get('Quantity'), record.get('TotalAmount')]):
+        return None
+    return record
+
+# Convert dictionary to CSV line
+def to_csv(record):
+    return f"{record['SaleID']},{record['CustomerID']},{record['ProductID']},{record['SaleDate']},{record['Quantity']},{record['TotalAmount']}"
+
+# Main pipeline
+def run():
+    options = PipelineOptions(
+        runner='DirectRunner',  # 👈 Local runner (no GCP)
+        save_main_session=True
+    )
+
+    with beam.Pipeline(options=options) as p:
+        (
+            p
+            | 'Read JSON' >> beam.io.ReadFromText('sales_sample.json')
+            | 'Parse JSON' >> beam.Map(parse_json)
+            | 'Drop Bad JSON' >> beam.Filter(lambda x: x is not None)
+            | 'Clean Records' >> beam.Map(clean_sales)
+            | 'Drop Nulls' >> beam.Filter(lambda x: x is not None)
+            | 'Convert to CSV' >> beam.Map(to_csv)
+            | 'Write Output' >> beam.io.WriteToText('silver_sales_local', file_name_suffix='.csv', shard_name_template='')
+        )
+
+if __name__ == '__main__':
+    run()
